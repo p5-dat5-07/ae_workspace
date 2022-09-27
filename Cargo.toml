@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "ss_analysis",
+    "midi_explorer",
+]
