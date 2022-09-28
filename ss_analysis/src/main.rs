@@ -1,30 +1,25 @@
-use std::{iter::Peekable, slice::Iter};
+use std::{fs::File, io::Write, iter::Peekable, slice::Iter};
 
 use plotters::prelude::*;
 
 use midly::{MidiMessage, Track, TrackEvent, TrackEventKind};
 
-type FeatureVector = [u8; 128];
+type FeatureVector = u128;
 
-fn similarity(a: &FeatureVector, b: &FeatureVector) -> u32 {
-    (&a[..])
-        .iter()
-        .zip(&b[..])
-        .map(|(a, b)| (a * b) as u32)
-        .reduce(|sum, x| sum + x)
-        .unwrap()
+fn similarity(a: &FeatureVector, b: &FeatureVector) -> f64 {
+    // Equivalent to the innerproduct between two 128 length vector
+    // containing only zeroes and ones.
+    // (a & b).count_ones() as u8
+
+    // Jaccard index based similarity calculation
+    (a & b).count_ones() as f64 / (a | b).count_ones() as f64
 }
-
-/*
-    TODO / things to consider
-     - Read the file instead of including it as a binary blob
-*/
 
 fn apply_event_to_feature(f: &mut FeatureVector, e: &TrackEvent) {
     if let TrackEventKind::Midi { message, .. } = e.kind {
         match message {
-            MidiMessage::NoteOn { key, .. } => f[key.as_int() as usize] = 1,
-            MidiMessage::NoteOff { key, .. } => f[key.as_int() as usize] = 0,
+            MidiMessage::NoteOn { key, .. } => *f = *f | 1u128 << key.as_int(),
+            MidiMessage::NoteOff { key, .. } => *f = *f & !(1u128 << key.as_int()),
             _ => (),
         }
     }
@@ -39,7 +34,7 @@ impl<'l> FeatureStream<'l> {
     fn new(src: &'l Track<'l>) -> Self {
         Self {
             iter: src.iter().peekable(),
-            feature: [0; 128],
+            feature: 0,
         }
     }
 }
@@ -82,20 +77,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         i += 1;
     }
 
-    println!("\n--Track 1 events:");
+    println!("\nProcessing MIDI features");
 
     let features: Vec<FeatureVector> = FeatureStream::new(&smf.tracks[1]).collect();
-    let count = features.len();
+    let count = 500usize; //features.len() / 10;
 
-    let mut ss_matrix = Vec::<u32>::with_capacity(features.len() * features.len());
+    println!("Calculating SSM ({count}x{count})");
+
+    let mut f = File::create("out.dat")?;
 
     for y in 0..count {
+        let offset = count * y;
         for x in 0..count {
-            ss_matrix.push(similarity(&features[y], &features[x]));
+            write!(f, "\t {}", similarity(&features[y], &features[x]))?;
         }
+        write!(f, "\n")?;
     }
 
-    let root = BitMapBackend::new("ssm.png", (1028, 720)).into_drawing_area();
+    println!("Plotting data");
+    let root =
+        BitMapBackend::new("ssm.png", (40 + count as u32, 100 + count as u32)).into_drawing_area();
     root.fill(&WHITE)?;
 
     let mut chart = ChartBuilder::on(&root)
@@ -103,28 +104,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .margin(5)
         .top_x_label_area_size(40)
         .y_label_area_size(40)
-        .build_cartesian_2d(0i32..15i32, 15i32..0i32)?;
+        .build_cartesian_2d(0i32..count as i32, (count as i32)..0)?;
 
     chart
         .configure_mesh()
-        .x_labels(count)
-        .y_labels(count)
-        .max_light_lines(4)
-        .x_label_offset(35)
-        .y_label_offset(25)
         .disable_x_mesh()
         .disable_y_mesh()
         .label_style(("sans-serif", 20))
         .draw()?;
 
-    chart.draw_series(ss_matrix.iter().enumerate().map(|(i, v)| {
-        let x = (i % count) as i32;
-        let y = (i / count) as i32;
-        Rectangle::new(
-            [(x, y), (x + 1, y + 1)],
-            RGBAColor(0, 0, 0, *v as f64 / 128f64).filled(),
-        )
-    }))?;
+    for y in 0..count {
+        chart.draw_series((0..count).map(|x| {
+            let a = similarity(&features[y], &features[x]);
+            Rectangle::new(
+                [(x as i32, y as i32), (x as i32 + 1, y as i32 + 1)],
+                RGBAColor(0, 0, 0, a).filled(),
+            )
+        }))?;
+    }
 
     Ok(())
 }

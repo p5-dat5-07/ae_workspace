@@ -1,6 +1,8 @@
 // On Windows platform, don't show a console when opening the app.
 #![windows_subsystem = "windows"]
 
+mod iref;
+
 use std::time::SystemTime;
 use std::sync::Arc;
 
