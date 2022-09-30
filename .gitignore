@@ -1,2 +1,6 @@
 target
 data
+ssm.png
+.idea
+training_checkpoints
+*.mid

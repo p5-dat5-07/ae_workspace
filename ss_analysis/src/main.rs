@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, iter::Peekable, slice::Iter};
+use std::{iter::Peekable, slice::Iter};
 
 use plotters::prelude::*;
 
@@ -12,14 +12,17 @@ fn similarity(a: &FeatureVector, b: &FeatureVector) -> f64 {
     // (a & b).count_ones() as u8
 
     // Jaccard index based similarity calculation
+    // this could be optimised with SIMD
     (a & b).count_ones() as f64 / (a | b).count_ones() as f64
 }
 
 fn apply_event_to_feature(f: &mut FeatureVector, e: &TrackEvent) {
     if let TrackEventKind::Midi { message, .. } = e.kind {
         match message {
-            MidiMessage::NoteOn { key, .. } => *f = *f | 1u128 << key.as_int(),
             MidiMessage::NoteOff { key, .. } => *f = *f & !(1u128 << key.as_int()),
+            MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => *f = *f & !(1u128 << key.as_int()),
+            
+            MidiMessage::NoteOn { key, .. } => *f = *f | 1u128 << key.as_int(),
             _ => (),
         }
     }
@@ -63,7 +66,7 @@ impl<'l> Iterator for FeatureStream<'l> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let data = include_bytes!("../../data/maestro300/2004/MIDI-Unprocessed_SMF_02_R1_2004_01-05_ORIG_MID--AUDIO_02_R1_2004_05_Track05_wav.midi");
+    let data = include_bytes!("../../data/maestro300/2004/MIDI-Unprocessed_SMF_12_01_2004_01-05_ORIG_MID--AUDIO_12_R1_2004_08_Track08_wav.midi");
     let smf = midly::Smf::parse(data)?;
 
     println!("MIDI information:");
@@ -80,19 +83,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nProcessing MIDI features");
 
     let features: Vec<FeatureVector> = FeatureStream::new(&smf.tracks[1]).collect();
-    let count = 500usize; //features.len() / 10;
+    let count = features.len();
 
-    println!("Calculating SSM ({count}x{count})");
-
-    let mut f = File::create("out.dat")?;
-
-    for y in 0..count {
-        let offset = count * y;
-        for x in 0..count {
-            write!(f, "\t {}", similarity(&features[y], &features[x]))?;
-        }
-        write!(f, "\n")?;
-    }
+    println!("SSM {count}x{count}");
 
     println!("Plotting data");
     let root =
