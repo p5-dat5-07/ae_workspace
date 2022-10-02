@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 midly = "0.5"
 plotters = "0.3"
+argh = "0.1"

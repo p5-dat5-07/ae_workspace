@@ -1,8 +1,16 @@
-use std::{iter::Peekable, slice::Iter};
+/*
+TODO: consider modelling time more accurately for the matrix
+TODO: Setup model and get some samples for comparison
+ */
 
+use std::{iter::Peekable, slice::Iter, fs::File, io::Read};
+
+use argh::FromArgs;
 use plotters::prelude::*;
 
 use midly::{MidiMessage, Track, TrackEvent, TrackEventKind};
+
+mod feature_space;
 
 type FeatureVector = u128;
 
@@ -21,7 +29,7 @@ fn apply_event_to_feature(f: &mut FeatureVector, e: &TrackEvent) {
         match message {
             MidiMessage::NoteOff { key, .. } => *f = *f & !(1u128 << key.as_int()),
             MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => *f = *f & !(1u128 << key.as_int()),
-            
+
             MidiMessage::NoteOn { key, .. } => *f = *f | 1u128 << key.as_int(),
             _ => (),
         }
@@ -65,9 +73,41 @@ impl<'l> Iterator for FeatureStream<'l> {
     }
 }
 
+/// Application for performing self-similarity and repetition analysis on
+/// MIDI files
+#[derive(FromArgs)]
+struct Options {
+    #[argh(positional)]
+    input_file: String,
+
+    /// an optional output destination.
+    #[argh(option, short = 'o')]
+    output_file: Option<String>,
+
+    /// whether to output as an alpha matrix instead of a png
+    #[argh(switch, short = 'a')]
+    output_mode_alpha: bool, 
+
+    /// dumps the events contained in the meta track
+    #[argh(switch, short = 'm')]
+    dump_meta_track: bool,
+
+    /// scaling factor
+    #[argh(option, short = 's', default = "1f64")]
+    scale: f64,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let data = include_bytes!("../../data/maestro300/2004/MIDI-Unprocessed_SMF_12_01_2004_01-05_ORIG_MID--AUDIO_12_R1_2004_08_Track08_wav.midi");
-    let smf = midly::Smf::parse(data)?;
+    let args: Options = argh::from_env();
+
+    let data = File::open(&args.input_file)
+        .and_then(|mut file| {
+            let mut data = Vec::new();
+            file.read_to_end(&mut data)?;
+            Ok(data)
+        })?;
+
+    let smf = midly::Smf::parse(&data)?;
 
     println!("MIDI information:");
     println!("\t- {:?}", smf.header);
@@ -80,23 +120,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         i += 1;
     }
 
+    if args.dump_meta_track {
+        println!("\nMeta track dump:");
+        for e in &smf.tracks[0] {
+            println!("{:?}", e)
+        }
+    }
+
     println!("\nProcessing MIDI features");
 
     let features: Vec<FeatureVector> = FeatureStream::new(&smf.tracks[1]).collect();
     let count = features.len();
 
-    println!("SSM {count}x{count}");
+    let output_path = args.output_file.unwrap_or(format!("{}.png", args.input_file));
 
-    println!("Plotting data");
+    println!("Plotting data {count}x{count}");
     let root =
-        BitMapBackend::new("ssm.png", (40 + count as u32, 100 + count as u32)).into_drawing_area();
+        BitMapBackend::new(&output_path, (count as u32, count as u32)).into_drawing_area();
     root.fill(&WHITE)?;
 
     let mut chart = ChartBuilder::on(&root)
-        .caption("Self similarity", 80)
-        .margin(5)
-        .top_x_label_area_size(40)
-        .y_label_area_size(40)
         .build_cartesian_2d(0i32..count as i32, (count as i32)..0)?;
 
     chart
