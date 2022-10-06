@@ -1,9 +1,4 @@
-/*
-TODO: consider modelling time more accurately for the matrix
-TODO: Setup model and get some samples for comparison
- */
-
-use std::{iter::Peekable, slice::Iter, fs::File, io::Read};
+use std::{fs::File, io::Read, iter::Peekable, iter::Take, slice::Iter};
 
 use argh::FromArgs;
 use plotters::prelude::*;
@@ -11,6 +6,11 @@ use plotters::prelude::*;
 use midly::{MidiMessage, Track, TrackEvent, TrackEventKind};
 
 mod feature_space;
+
+// Scales the tuple and converts the values from unsigned to signed integers
+pub fn scale_tuple((a, b): (u32, u32), scale: f64) -> (u32, u32) {
+    ((a as f64 * scale) as u32, (b as f64 * scale) as u32)
+}
 
 type FeatureVector = u128;
 
@@ -28,7 +28,9 @@ fn apply_event_to_feature(f: &mut FeatureVector, e: &TrackEvent) {
     if let TrackEventKind::Midi { message, .. } = e.kind {
         match message {
             MidiMessage::NoteOff { key, .. } => *f = *f & !(1u128 << key.as_int()),
-            MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => *f = *f & !(1u128 << key.as_int()),
+            MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => {
+                *f = *f & !(1u128 << key.as_int())
+            }
 
             MidiMessage::NoteOn { key, .. } => *f = *f | 1u128 << key.as_int(),
             _ => (),
@@ -86,7 +88,7 @@ struct Options {
 
     /// whether to output as an alpha matrix instead of a png
     #[argh(switch, short = 'a')]
-    output_mode_alpha: bool, 
+    output_mode_alpha: bool,
 
     /// dumps the events contained in the meta track
     #[argh(switch, short = 'm')]
@@ -97,15 +99,63 @@ struct Options {
     scale: f64,
 }
 
+struct Segment<'l, I: Iterator> {
+    iter: &'l mut I,
+    remaining: usize,
+}
+
+impl<'l, I> Segment<'l, I>
+where
+    I: Iterator,
+{
+    fn iter_segment(iter: &'l mut I, segment_size: usize) -> Self {
+        Segment {
+            iter,
+            remaining: segment_size,
+        }
+    }
+}
+
+impl<'l, I> Iterator for Segment<'l, I>
+where
+    I: Iterator,
+{
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining > 0 {
+            self.remaining -= 1;
+            self.iter.next()
+        } else {
+            None
+        }
+    }
+}
+
+fn segment_map_iterator<T, I, E>(
+    iter: I,
+    segment_size: usize,
+    mut f: impl FnMut(Segment<Peekable<I>>) -> Result<(), E>,
+) -> Result<(), E>
+where
+    I: Iterator<Item = T>,
+{
+    let mut iter = iter.peekable();
+    while (iter.peek()).is_some() {
+        let segment = Segment::iter_segment(&mut iter, segment_size);
+        f(segment)?;
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Options = argh::from_env();
 
-    let data = File::open(&args.input_file)
-        .and_then(|mut file| {
-            let mut data = Vec::new();
-            file.read_to_end(&mut data)?;
-            Ok(data)
-        })?;
+    let data = File::open(&args.input_file).and_then(|mut file| {
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)?;
+        Ok(data)
+    })?;
 
     let smf = midly::Smf::parse(&data)?;
 
@@ -129,26 +179,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\nProcessing MIDI features");
 
-    let features: Vec<FeatureVector> = FeatureStream::new(&smf.tracks[1]).collect();
-    let count = features.len();
+    let timed_space = feature_space::TimedSpace::new(&smf.tracks[1]);
+    let count = timed_space.feature_count();
+    let size = timed_space.size();
 
-    let output_path = args.output_file.unwrap_or(format!("{}.png", args.input_file));
+    //let features: Vec<FeatureVector> = FeatureStream::new(&smf.tracks[1]).collect();
+    //let count = features.len();
 
-    println!("Plotting data {count}x{count}");
-    let root =
-        BitMapBackend::new(&output_path, (count as u32, count as u32)).into_drawing_area();
+    let output_path = args
+        .output_file
+        .unwrap_or(format!("{}.png", args.input_file));
+
+    println!(
+        "Plotting data <features = {count} ; matrix size = {size} ; scale = {}>",
+        args.scale
+    );
+    let root = BitMapBackend::new(&output_path, (size, size)).into_drawing_area();
     root.fill(&WHITE)?;
 
-    let mut chart = ChartBuilder::on(&root)
-        .build_cartesian_2d(0i32..count as i32, (count as i32)..0)?;
+    let mut chart = ChartBuilder::on(&root).build_cartesian_2d(0..size, size..0)?;
 
     chart
         .configure_mesh()
         .disable_x_mesh()
         .disable_y_mesh()
-        .label_style(("sans-serif", 20))
         .draw()?;
 
+    segment_map_iterator(timed_space.draw(args.scale), 10, |segment| {
+        println!("printing segment");
+        chart.draw_series(segment)?;
+        Result::<(), Box<dyn std::error::Error>>::Ok(())
+    })?;
+
+    /*
     for y in 0..count {
         chart.draw_series((0..count).map(|x| {
             let a = similarity(&features[y], &features[x]);
@@ -157,7 +220,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 RGBAColor(0, 0, 0, a).filled(),
             )
         }))?;
-    }
+    }*/
 
     Ok(())
 }
