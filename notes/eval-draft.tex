@@ -1,0 +1,39 @@
+\documentclass[a4paper]{tufte-handout}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{listings}
+
+\title{Draft: Automating Output Evaluation}
+\author{Jonas Mærsk Thye Kjellerup}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\newpage
+
+%
+% START COPY
+%
+
+\section{Self-similarity Matrices}\label{sec:theory-ssm}
+A similarity matrix is used to analyse the similarity of two time series that consist of similar features. The matrix is described in terms of the similarity measure of its features $s : \mathcal{f} \times \mathcal{f} \rightarrow \mathbb{R}$, where $\mathcal{f}$ is the feature space. In turn the similarity matrix $S \in \mathbb{R}^{N \times M}$ is defined as follows, where $x$ and $y$ are time series:
+
+\[ S(n,m)=s(x_n,y_m) \]
+
+A self-similarity matrix (hereon abrreviated as SSM) is a similarity matrix, where both timeseries $x$ and $y$ are the same. Looking at the self-similarity data can be useful when trying to detect patterns and reptetion within the data.
+
+
+\section{Jaccard Index}\label{sec:theory-jaccard}
+
+The Jaccard index is a measure of similarity between two sets. It is defined as the ratio between the intersection of two sets and the union of those sets. \cite{jaccard}
+
+\[ J(A,B) = \frac{ A \cap B }{ A \cup B} \]
+
+In the context of computer programming, it can be worth noting that a series of bits can be used to represent a finite set, where each bit represents whether a given element is present in the set. This allows for the substitution of the union and intersection operations in favor of the bitwise or and bitwise and operations, which are generally easier for a computer to compute.
+
+%
+% END COPY
+%
+
+\end{document}

@@ -1,47 +1,9 @@
 use std::{fs::File, io::Read};
 
 use argh::FromArgs;
-use plotters::prelude::*;
+use plotters::{prelude::*, element::PointCollection};
 
 mod feature_space;
-
-/*
-struct FeatureStream<'l> {
-    iter: Peekable<Iter<'l, TrackEvent<'l>>>,
-    feature: FeatureVector,
-}
-
-impl<'l> FeatureStream<'l> {
-    fn new(src: &'l Track<'l>) -> Self {
-        Self {
-            iter: src.iter().peekable(),
-            feature: 0,
-        }
-    }
-}
-
-impl<'l> Iterator for FeatureStream<'l> {
-    type Item = FeatureVector;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let r = self
-            .iter
-            .next()
-            .map(|e| apply_event_to_feature(&mut self.feature, e));
-
-        while let Some(TrackEvent { delta, .. }) = self.iter.peek() {
-            if delta.as_int() != 0 {
-                break;
-            }
-
-            self.iter
-                .next()
-                .map(|e| apply_event_to_feature(&mut self.feature, e));
-        }
-
-        r.map(|_| self.feature.clone())
-    }
-}*/
 
 /// Application for performing self-similarity and repetition analysis on
 /// MIDI files.
@@ -58,7 +20,7 @@ struct Options {
     #[argh(option, short = 'o')]
     output_file: Option<String>,
 
-    /// whether to output as an alpha matrix instead of a png (currently unavailable)
+    /// whether to output as an alpha matrix instead of a png (currently unimplemented)
     #[argh(switch, short = 'a')]
     output_mode_alpha: bool,
 
@@ -69,6 +31,10 @@ struct Options {
     /// scaling factor
     #[argh(option, short = 's', default = "1f64")]
     scale: f64,
+
+    /// limit the duration that is being analyzed
+    #[argh(option, short = 'l')]
+    limit: Option<u32>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -104,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let timed_space = feature_space::TimedSpace::new(&smf.tracks[1]);
     let count = timed_space.feature_count();
-    let size = timed_space.size();
+    let size = args.limit.unwrap_or(timed_space.size());
 
     let output_path = args
         .output_file
@@ -127,18 +93,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .disable_y_mesh()
         .draw()?;
 
-    chart.draw_series(timed_space.draw())?;
-
-    /*
-    for y in 0..count {
-        chart.draw_series((0..count).map(|x| {
-            let a = similarity(&features[y], &features[x]);
-            Rectangle::new(
-                [(x as i32, y as i32), (x as i32 + 1, y as i32 + 1)],
-                RGBAColor(0, 0, 0, a).filled(),
-            )
+    if let Some(limit) = args.limit {
+        chart.draw_series(timed_space.draw().filter(|rect| {
+            let a = (&rect).point_iter();
+            a[0].0 < limit && a[0].1 < limit
         }))?;
-    }*/
+    } else {
+        chart.draw_series(timed_space.draw())?;
+    }
 
     Ok(())
 }

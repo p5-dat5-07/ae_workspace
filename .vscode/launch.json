@@ -1,0 +1,49 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'ss_analysis'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=ss_analysis",
+                    "--package=ss_analysis"
+                ],
+                "filter": {
+                    "name": "ss_analysis",
+                    "kind": "bin"
+                }
+            },
+            "args": [ 
+                "./data/maestro300/2008/MIDI-Unprocessed_01_R1_2008_01-04_ORIG_MID--AUDIO_01_R1_2008_wav--1.midi",
+                "-o",
+                "./out.png"
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'ss_analysis'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=ss_analysis",
+                    "--package=ss_analysis"
+                ],
+                "filter": {
+                    "name": "ss_analysis",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
