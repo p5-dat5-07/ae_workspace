@@ -1,4 +1,4 @@
-use std::iter;
+use std::{iter, ops::Index};
 
 use midly::{MetaMessage, MidiMessage, Track, TrackEventKind};
 use plotters::{
@@ -14,13 +14,12 @@ use plotters::{
 pub struct FeatureVector(u128);
 
 impl FeatureVector {
-
     /// Computes the similarity between two `FeatureVector`s.
     /// Current implementation is based on the Jaccard index:
     ///     J(A,B) = |A intersect B| / |A union B|
     /// Where A and B are sets of notes that are active in
     /// the respective features.
-    /// 
+    ///
     /// The implementation exploits the fact that we represent
     /// the notes as binary features (as being either on or off)
     /// to translate set operations (intersect, union) into corresponding
@@ -30,7 +29,7 @@ impl FeatureVector {
         (self.0 & other.0).count_ones() as f64 / (self.0 | other.0).count_ones() as f64
     }
 
-    /// Applies a MIDI event to a copy of the given feature vector 
+    /// Applies a MIDI event to a copy of the given feature vector
     /// updating the relevent component to match to change described in the event.
     fn apply(self, message: &MidiMessage) -> Self {
         Self(match message {
@@ -88,14 +87,13 @@ impl TimedSpace {
         ts
     }
 
-
     /// Creates an iterator over all unique feature combinations.
     /// (Meaning: if pair (x,y) is encountered, then (y,x) will not be)
-    pub fn iter_pairs<'l>(&'l self) -> impl Iterator<Item = (&'l (FeatureVector, u32, u32), &'l (FeatureVector, u32, u32))> {
+    pub fn iter_pairs<'l>(
+        &'l self,
+    ) -> impl Iterator<Item = (&'l (FeatureVector, u32, u32), &'l (FeatureVector, u32, u32))> {
         let mut skip_offset = 0;
-        let iter = self
-            .features
-            .iter();
+        let iter = self.features.iter();
 
         iter.clone()
             .map(move |v| {
@@ -129,5 +127,29 @@ impl TimedSpace {
 
     pub fn size(&self) -> u32 {
         self.duration
+    }
+}
+
+struct Matrix(Vec<f64>);
+
+impl Matrix {
+    fn new(size: usize) -> Self {
+        let n = (size * (size + 1)) / 2;
+        Self(Vec::with_capacity(n))
+    }
+}
+
+impl<T: Copy + Into<usize>> Index<(T, T)> for Matrix {
+    type Output = f64;
+
+    fn index(&self, index: (T, T)) -> &Self::Output {
+        let i: (usize, usize) = (index.0.into(), index.1.into());
+        let (x, y) = match i {
+            (x, y) if x > y => (y, x),
+            (x, y) if x == y => return &1.0,
+            _ => i,
+        };
+
+        &1.0
     }
 }
