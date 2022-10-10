@@ -1,0 +1,8 @@
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-feature=+popcnt"]
+
+[target.x86_64-apple-darwin]
+rustflags = [
+  "-C", "link-arg=-undefined",
+  "-C", "link-arg=dynamic_lookup",
+]

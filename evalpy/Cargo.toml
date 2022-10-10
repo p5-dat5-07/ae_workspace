@@ -1,0 +1,14 @@
+[package]
+name = "evalpy"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ss_analysis = { path = "../ss_analysis" }
+
+[dependencies.cpython]
+ version = "0.7"
+ features = ["extension-module"]

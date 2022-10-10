@@ -2,4 +2,5 @@
 
 members = [
     "ss_analysis",
+    "evalpy",
 ]

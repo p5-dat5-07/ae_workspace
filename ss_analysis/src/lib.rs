@@ -1,9 +1,77 @@
-use std::{fs::File, io::Read};
+use std::{fs::File, io::Read, ops::Deref, marker::PhantomData};
 
 use argh::FromArgs;
+use midly::Track;
 use plotters::{prelude::*, element::PointCollection};
 
+pub use midly;
+
 mod feature_space;
+mod analysis;
+
+pub fn reduce_track_domain(track: &mut Track) {
+    let deltas: Vec<u32> = track.iter()
+        .map(|event| event.delta.as_int())
+        .collect();
+
+    if let Some(divisor) = gcd(&deltas) {
+        println!("domain gcd = {divisor}");
+        for event in track {
+            event.delta = midly::num::u28::from(event.delta.as_int() / divisor);
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_gcd() {
+    let data = File::open("../data/maestro300/2004/MIDI-Unprocessed_SMF_02_R1_2004_01-05_ORIG_MID--AUDIO_02_R1_2004_05_Track05_wav.midi").and_then(|mut file| {
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)?;
+        Ok(data)
+    }).unwrap();
+
+    let mut smf = midly::Smf::parse(&data).unwrap();
+    reduce_track_domain(&mut smf.tracks[1]);
+
+}
+
+/// An object that allows for an image type `I` to contain
+/// to heap allocated data of type `T` owned by the Lens.
+pub struct Lens<'l, T, I>
+where T: 'l, I: 'l
+{
+    _data: T,
+    image: I,
+    _p: PhantomData<&'l ()>,
+}
+
+impl<T, I> Lens<'static, Box<T>, I>
+where T: 'static
+{
+
+    pub fn new(data: T, lens_fn: impl Fn(&'static T) -> I) -> Self {
+        let boxed = Box::new(data);
+        // safety: we guarantee at the API level that data is not mutated or moved
+        //         and that the data and image lives equally as long.
+        let image = lens_fn(unsafe { std::mem::transmute(boxed.as_ref()) });
+        Self {
+            _data: boxed,
+            image,
+            _p: PhantomData,
+        }
+    }
+
+}
+
+// Allows us to use the lens as if it was the image object
+impl<'l, T, I> Deref for Lens<'l , T, I> {
+    type Target = I;
+
+    fn deref(&self) -> &Self::Target {
+        &self.image
+    }
+}
 
 /// Application for performing self-similarity and repetition analysis on
 /// MIDI files.
