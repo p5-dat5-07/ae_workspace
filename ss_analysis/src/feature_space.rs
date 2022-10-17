@@ -1,4 +1,5 @@
-use std::{iter};
+use std::iter;
+use std::mem::take;
 
 use midly::{MetaMessage, MidiMessage, Track, TrackEventKind};
 use plotters::{
@@ -9,7 +10,7 @@ use plotters::{
 /// A feature vector represented as a 128-bit unsigned integer.
 /// Each entry in the vector is the binary (on/off) state of a
 /// corresponding MIDI note.
-/// The vector thusly describes which MIDI notesare being played at a given time.
+/// The vector thusly describes which MIDI notes are being played at a given time.
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct FeatureVector(u128);
 
@@ -47,21 +48,24 @@ impl FeatureVector {
     }
 }
 
-pub struct TimedSpace {
-    duration: u32,
-    features: Vec<(FeatureVector, u32, u32)>, // (_, duration, offset)
+type TemporalUnitType = f32;
+type TemporalFeature = (FeatureVector, TemporalUnitType, TemporalUnitType);
+
+pub struct TemporalSpace {
+    duration: TemporalUnitType,
+    features: Vec<TemporalFeature>, // (_, duration, offset)
 }
 
-impl TimedSpace {
+impl TemporalSpace {
     pub fn new(track: &Track) -> Self {
         let mut ts = Self {
-            duration: 0,
+            duration: 0.0,
             features: Vec::new(),
         };
         let mut vector = FeatureVector::default();
-        let mut duration = 0;
+        let mut duration = 0.0;
         for event in track {
-            duration += event.delta.as_int();
+            duration += event.delta.as_int() as f32;
             match event.kind {
                 TrackEventKind::Midi { message, .. } => {
                     let v = vector.apply(&message);
@@ -87,11 +91,23 @@ impl TimedSpace {
         ts
     }
 
+    /// Scales the domain (time axis) of the feature space.
+    /// Generally used for the purpose of reduce the size
+    /// resulting similarity matrix, reducing memory requirements.
+    fn scale_domain(&mut self, scale: TemporalUnitType) {
+        self.duration *= scale;
+        let features = take(&mut self.features);
+        self.features = features
+            .into_iter()
+            .map(|(vector, duration, offset)| (vector, duration * scale, offset * scale))
+            .collect();
+    }
+
     /// Creates an iterator over all unique feature combinations.
     /// (Meaning: if pair (x,y) is encountered, then (y,x) will not be)
     pub fn iter_pairs<'l>(
         &'l self,
-    ) -> impl Iterator<Item = (&'l (FeatureVector, u32, u32), &'l (FeatureVector, u32, u32))> {
+    ) -> impl Iterator<Item = (&'l TemporalFeature, &'l TemporalFeature)> {
         let mut skip_offset = 0;
         let iter = self.features.iter();
 
@@ -109,8 +125,8 @@ impl TimedSpace {
     pub fn draw<'l>(&'l self) -> impl Iterator<Item = Rectangle<(u32, u32)>> + 'l {
         self.iter_pairs()
             .map(move |(a, b)| {
-                let (x, y) = (a.2, b.2);
-                let (x2, y2) = (a.2 + a.1, b.2 + b.1);
+                let (x, y) = (a.2 as u32, b.2 as u32);
+                let (x2, y2) = ((a.2 + a.1) as u32, (b.2 + b.1) as u32);
                 let color = BLACK.mix(a.0.similarity_of(&b.0)).filled();
 
                 [
@@ -126,6 +142,6 @@ impl TimedSpace {
     }
 
     pub fn size(&self) -> u32 {
-        self.duration
+        self.duration as u32
     }
 }

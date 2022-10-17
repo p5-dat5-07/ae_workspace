@@ -29,7 +29,7 @@ A similarity matrix is used to analyse the similarity of two time series that co
 
 \[ S(n,m)=s(x_n,y_m) \]
 
-A self-similarity matrix (hereon abrreviated as SSM) is a similarity matrix, where both timeseries $x$ and $y$ are the same. Looking at the self-similarity data can be useful when trying to detect patterns and reptetion within data.
+A self-similarity matrix (hereon abbreviated as SSM) is a similarity matrix, where both time-series $x$ and $y$ are the same. Looking at the self-similarity data can be useful when trying to detect patterns and repetition within data.
 
 \begin{figure}[h]
     \center
@@ -37,12 +37,14 @@ A self-similarity matrix (hereon abrreviated as SSM) is a similarity matrix, whe
     \includegraphics[width=3.5cm]{model_out_1.png}
     \includegraphics[width=3.5cm]{model_out_2.png}
     \caption{
-        Visualisations of SSMs of three different datasets. The leftmost one being a MIDI file from the maestro dataset \cite{maestro}, and two other two being MIDI files output by a neural network.
+        Visualisations of SSMs of three different data sets. The leftmost one being a MIDI file from the maestro data set \cite{maestro}, and two other two being MIDI files output by a neural network.
     }
     \label{fig:ssm-comp}
 \end{figure}
 
 In figure \ref{fig:ssm-comp} it can be seen that the matrix is symmetric across the top-left/bottom-right diagonal, meaning that $S(x,y)=S(y,x)$. This is a result of the matrix being composed of two identical data series. This can be exploited when trying to store the digital representation of the matrix, in a computer program, by omitting either side of the matrix. This results in the matrix taking up memory equivalent to $N \cdot (N+1) \cdot \frac{1}{2}$ instead of $N^2$.
+
+When taking a look at the data sets visualized in figure \ref{fig:ssm-comp} one will quickly notice a stark difference in the structure of the variours data sets. The MIDI data produced by the neural networks generally tends towards extremes of internal similarity, with the rightmost SSM displaying very high similarity and the middle SSM displaying very little similarity. Additionally these matricies show a lack of structure at the macro level. If we instead look at the MIDI data from the maestro data set we see less extreme levels of similarity that tends to occur in recurring patterns.
 
 \section{Jaccard Index}\label{sec:theory-jaccard}
 
@@ -50,7 +52,7 @@ The Jaccard index is a measure of similarity between two sets. It is defined as 
 
 \[ J(A,B) = \frac{ A \cap B }{ A \cup B} \]
 
-In the context of computer programming, it can be worth noting that a series of bits can be used to represent a finite set, where each bit represents whether a given element is present in the set. This allows for the substitution of the union and intersection operations in favor of the bitwise or and bitwise and operations, which are generally easier for a computer to compute.
+In the context of computer programming, it can be worth noting that a series of bits can be used to represent a finite set, where each bit represents whether a given element is present in the set. This allows for the substitution of the union and intersection operations in favor of the \textit{bitwise or} and \textit{bitwise and} operations, which are generally easier for a computer to compute.
 
 \printbibliography
 

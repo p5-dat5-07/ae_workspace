@@ -1,104 +1,173 @@
-use std::{io::{Read, Write, stdout}, fs::File, sync::Mutex};
+use std::{
+    fs::File,
+    io::{stdout, Read, Write},
+    sync::Arc, collections::HashMap,
+};
 
-use cpython::{PyResult, Python, py_module_initializer, py_fn};
-use ss_analysis::{midly, Lens};
+use pyo3::{prelude::*, exceptions::{PyIOError, PyBaseException}};
+use ss_analysis::{midly::{self, TrackEvent, Track}, plotters::prelude::*, Lens, TemporalSpace};
 
-// Register python module/functions
-py_module_initializer!(evalpy, |py, m| {
-    m.add(py, "__doc__", "Python bindings for evaluation functionality implented in rust.")?;
-    m.add(py, "load_midi", py_fn!(py, load_midi(path: String)))?;
-    m.add(py, "unload_midi", py_fn!(py, unload_object(i: usize)))?;
-    m.add(py, "print_midi_track", py_fn!(py, print_midi_track(i: usize, track: usize)))?;
-    Ok(())
-});
+// Error handling/conversion
 
-type MidiLens = Lens<'static, Box<Vec<u8>>, midly::Smf<'static>>;
-
-enum Object {
-    Midi(MidiLens),
-    None(Option<usize>),
+#[derive(Debug)]
+enum ErrorKind {
+    IO,
+    Midly,
+    Generic,
 }
 
-struct ModuleContext {
-    objects: Vec<Object>,
-    next_loc: Option<usize>,
+#[derive(Debug)]
+struct Error {
+    inner: Box<dyn std::error::Error>,
+    kind: ErrorKind,
 }
 
-impl ModuleContext {
-    const fn new() -> Self {
-        ModuleContext {
-            objects: Vec::new(),
-            next_loc: None,
-        }
-    }
-
-    fn insert_object(&mut self, obj: Object) -> usize {
-        if let Some(i) = self.next_loc {
-            self.next_loc = match self.objects[i] {
-                Object::None(next) => next,
-                _ => unreachable!("Object referred to by`ModuleContext::next_loc` must always be a Object::None."),
-            };
-
-            self.objects[i] = obj;
-            i
-        } else {
-            let i = self.objects.len();
-            self.objects.push(obj);
-            i
-        }
-    }
-
-    fn remove_object(&mut self, i: usize) {
-        if let Some(obj) = self.objects.get_mut(i) {
-            *obj = Object::None(self.next_loc);
-            self.next_loc = Some(i);
+impl From<midly::Error> for Error {
+    fn from(err: midly::Error) -> Self {
+        Self {
+            inner: err.into(),
+            kind: ErrorKind::Midly,
         }
     }
 }
 
-static MODULE_CTX: Mutex<ModuleContext> = Mutex::new(ModuleContext::new());
-
-fn load_midi(_: Python, path: String) -> PyResult<i32> {
-    let data = File::open(&path)
-        .and_then(|mut file| {
-            let mut data = Vec::new();
-            file.read_to_end(&mut data)?;
-            Ok(data)
-        }).unwrap();
-    
-    let lens = Lens::new(data, |data| {
-        let mut smf = midly::Smf::parse(&data).unwrap();
-        ss_analysis::reduce_track_domain(&mut smf.tracks[1]);
-        smf
-    });
-    let mut ctx = MODULE_CTX.lock().unwrap();
-
-    Ok(ctx.insert_object(Object::Midi(lens)) as i32)
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Self {
+            inner: err.into(),
+            kind: ErrorKind::IO,
+        }
+    }
 }
 
-fn unload_object(_: Python, i: usize) -> PyResult<i32> {
-    let mut ctx = MODULE_CTX.lock().unwrap();
-    ctx.remove_object(i);
-    Ok(1)
-}
-
-fn print_midi_track(_: Python, i: usize, track: usize) -> PyResult<i32> {
-    let ctx = MODULE_CTX.lock().unwrap();
-    Ok(ctx.objects.get(i)
-            .and_then(|obj| match obj {
-                Object::Midi(smf) => Some(smf),
-                _ => None,
-            })
-            .and_then(|smf| smf.tracks.get(track))
-            .map(|track| {
-                let mut stdout = stdout().lock();
-    
-                write!(stdout, "Printing MIDI track ({} events)\n", track.len()).unwrap();
-                for ele in track {
-                    write!(stdout, "{:#?}\n", ele).unwrap();
-                }
-                1
-            })
-            .unwrap_or(0)
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[evalpy err: {:?}]: {}",
+            self.kind,
+            self.inner.to_string()
         )
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<Error> for PyErr {
+    fn from(err: Error) -> PyErr {
+        let msg = err.to_string();
+        match err.kind {
+            ErrorKind::IO => PyIOError::new_err(msg),
+            ErrorKind::Midly
+            | ErrorKind::Generic => PyBaseException::new_err(msg),
+        }
+    }
+}
+
+/// Entrypoint function for the python module.
+/// This function is responsible for registering
+/// all necesarry python functions/types.
+#[pymodule]
+fn evalpy(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    m.add_class::<MidiObject>()?;
+    m.add_class::<TrackObject>()?;
+    m.add_class::<TrackIterator>()?;
+    Ok(())
+}
+
+// The MIDI lens is wrapped in a Arc object to ensure that it lives for as long as it is referenced
+// allowing for track lenses to borrow the midi data.
+type MidiLens = Arc<Lens<Box<Vec<u8>>, midly::Smf<'static>>>;
+type TrackLens = Lens<MidiLens, &'static Track<'static>>;
+
+#[pyclass]
+struct MidiObject {
+    data: MidiLens,
+}
+
+#[pymethods]
+impl MidiObject {
+    #[new]
+    pub fn new(path: String) -> PyResult<Self> {
+        let mut file = File::open(&path)?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)?;
+        Ok(
+            Lens::try_new::<Error>(data, |data| Ok(midly::Smf::parse(&data)?))
+                .map(|lens| Self { data: MidiLens::new(lens) })?,
+        )
+    }
+    
+    pub fn headers(&self) -> HashMap<&'static str, String> {
+        let mut map = HashMap::new();
+        
+        map.insert("format", format!("{:?}", self.data.header.format));
+        map.insert("timing", format!("{:?}", self.data.header.timing));
+        
+        map
+    }
+    
+    pub fn track_count(&self) -> usize {
+        self.data.tracks.len()
+    }
+}
+
+#[pyclass]
+// TODO implement sequencing
+struct TrackObject {
+    data: TrackLens,
+}
+
+#[pymethods]
+impl TrackObject {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyResult<Py<TrackIterator>> {
+        let iter = TrackIterator {
+            iter: slf.data.clone_map(|track| track.iter()),
+        };
+        Py::new(slf.py(), iter)
+    }
+    
+    fn feature_space(&self) -> FeatureSpaceObject {
+        FeatureSpaceObject { inner: TemporalSpace::new(*self.data) }
+    }
+}
+
+#[pyclass]
+struct TrackIterator {
+    iter: Lens<MidiLens, std::slice::Iter<'static, TrackEvent<'static>>>,
+}
+
+#[pymethods]
+impl TrackIterator {
+    fn __item__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+    
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<u32> {
+        let a = slf.iter.next();
+        a.map(|e| {e.delta.as_int()})
+    }
+}
+
+#[pyclass]
+struct FeatureSpaceObject {
+    inner: TemporalSpace,
+}
+
+#[pymethods]
+impl FeatureSpaceObject {
+    
+    fn draw_ssm(&self, path: &str, scale: f32) -> PyResult<()> {
+        let size = (self.inner.size() as f32 * scale) as u32;
+        let root = BitMapBackend::new(path, (size, size)).into_drawing_area();
+        root.fill(&WHITE).map_err(|_| PyBaseException::new_err("Unexpected error drawing SSM"))?;
+        
+        let size = self.inner.size();
+        let mut chart = ChartBuilder::on(&root).build_cartesian_2d(0..size, size..0)
+            .map_err(|_| PyBaseException::new_err("Unexpected error drawing SSM"))?;
+        
+        chart.draw_series(self.inner.draw()).unwrap();
+        Ok(())
+    }
+    
 }

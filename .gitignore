@@ -1,5 +1,7 @@
 target
+venv
 data
+build
 ssm.png
 .idea
 training_checkpoints

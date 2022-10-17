@@ -9,6 +9,6 @@ crate-type = ["cdylib"]
 [dependencies]
 ss_analysis = { path = "../ss_analysis" }
 
-[dependencies.cpython]
- version = "0.7"
+[dependencies.pyo3]
+ version = "0.17"
  features = ["extension-module"]
