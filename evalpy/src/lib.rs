@@ -72,6 +72,7 @@ fn evalpy(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<MidiObject>()?;
     m.add_class::<TrackObject>()?;
     m.add_class::<TrackIterator>()?;
+    m.add_class::<FeatureSpaceObject>()?;
     Ok(())
 }
 
@@ -80,7 +81,7 @@ fn evalpy(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
 type MidiLens = Arc<Lens<Box<Vec<u8>>, midly::Smf<'static>>>;
 type TrackLens = Lens<MidiLens, &'static Track<'static>>;
 
-#[pyclass]
+#[pyclass(sequence)]
 struct MidiObject {
     data: MidiLens,
 }
@@ -107,9 +108,24 @@ impl MidiObject {
         map
     }
     
-    pub fn track_count(&self) -> usize {
+    fn __len__(&self) -> usize {
         self.data.tracks.len()
     }
+    
+    fn __getitem__(&self, i: isize) -> TrackObject {
+        let i = if i < 0 {
+            self.data.tracks.len() as isize + i
+        } else {
+            i
+        };
+        
+        TrackObject {
+            data: TrackLens::new_rc(self.data.clone(), |data| {
+                &data.tracks[i as usize]
+            })
+        }
+    }
+    
 }
 
 #[pyclass]

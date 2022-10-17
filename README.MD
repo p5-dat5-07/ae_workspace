@@ -16,17 +16,17 @@ The first step is to setup a virtual evironment
 
 ```sh
 python -m venv ./venv
-chmod +x ./venv/bin/activate # only on unix systems
 ```
 
-To activate the virtual environment (this needs to be redone everytime the shell is closed):
+Once created the environment must be activated. This has to be done everytime your shell is restarted:
 ```sh
-./venv/bin/activate
+source ./venv/bin/activate # POSIX/unix only
+venv\Scripts\activate.bat # Windows only
 ```
 
 Install dependencies and build the bindings:
 ```sh
 pip install -r ./evalpy/requirements.txt
-cd ./evalpy
-python ./evalpy/setup.py build
+pip install maturin
+maturin develop -r -m ./evalpy/Cargo.toml
 ```
