@@ -12,7 +12,7 @@ use pyo3::{
 use ss_analysis::{
     midly::{self, MidiMessage, Track, TrackEvent, TrackEventKind, MetaMessage},
     plotters::prelude::*,
-    Lens, TemporalSpace,
+    Lens, TemporalSpace, trim_midi,
 };
 
 // Error handling/conversion
@@ -82,6 +82,22 @@ fn evalpy(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<MidiEventKind>()?;
     m.add_class::<MidiEventObject>()?;
     m.add_class::<FeatureSpaceObject>()?;
+    m.add_function(wrap_pyfunction!(trim_file, m)?)?;
+    Ok(())
+}
+
+#[pyfunction]
+fn trim_file(input: String, output: String) -> PyResult<()> {
+    let mut file = File::open(&input)?;
+    let mut data = Vec::new();
+    file.read_to_end(&mut data)?;
+    
+    let smf = midly::Smf::parse(&data)
+        .map_err(Error::from)?;
+    
+    let smf = trim_midi(smf);
+    smf.save(&output)?;
+    
     Ok(())
 }
 
@@ -162,28 +178,15 @@ impl TrackObject {
             i
         };
 
-        let event = &self.inner[i as usize];
-        MidiEventObject {
-            delta: event.delta.as_int(),
-            inner: match event.kind {
-                TrackEventKind::Midi { message, .. } => match message {
-                    MidiMessage::NoteOn { key, vel } => MidiEventData::NoteData {
-                        velocity: vel.as_int(),
-                        key: key.as_int(),
-                    },
-                    MidiMessage::NoteOff { key, .. } => MidiEventData::NoteData {
-                        velocity: 0,
-                        key: key.as_int(),
-                    },
-                    _ => MidiEventData::Other,
-                },
-                TrackEventKind::Meta(MetaMessage::TimeSignature(a, b, c, d)) => MidiEventData::TimeSignature([a,b,c,d]),
-                TrackEventKind::Meta(MetaMessage::EndOfTrack) => MidiEventData::EndOfTrack,
-                _ => MidiEventData::Other,
-            },
-        }
+        MidiEventObject::from(&self.inner[i as usize])
     }
 
+    fn dbg_event_print(&self, offset: usize) -> Option<String> {
+        self.inner
+            .get(offset)
+            .map(|event| format!("{:#?}", event))
+    }
+    
     fn dbg_print(&self) {
         println!("{:#?}", *(self.inner))
     }
@@ -206,9 +209,8 @@ impl TrackIterator {
         slf
     }
 
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<u32> {
-        let a = slf.iter.next();
-        a.map(|e| e.delta.as_int())
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<MidiEventObject> {
+        slf.iter.next().map(MidiEventObject::from)
     }
 }
 
@@ -222,6 +224,7 @@ enum MidiEventKind {
     Other,
 }
 
+#[derive(Debug)]
 enum MidiEventData {
     NoteData { velocity: u8, key: u8 },
     TimeSignature([u8; 4]),
@@ -230,6 +233,7 @@ enum MidiEventData {
 }
 
 #[pyclass]
+#[derive(Debug)]
 struct MidiEventObject {
     #[pyo3(get)]
     delta: u32,
@@ -238,6 +242,16 @@ struct MidiEventObject {
 
 #[pymethods]
 impl MidiEventObject {
+    #[getter]
+    fn kind(&self) -> MidiEventKind {
+        match self.inner {
+            MidiEventData::NoteData { .. } => MidiEventKind::Note,
+            MidiEventData::TimeSignature(..) => MidiEventKind::TimeSignature,
+            MidiEventData::EndOfTrack => MidiEventKind::EndOfTrack,
+            _ => MidiEventKind::Other,
+        }   
+    }
+    
     #[getter]
     fn velocity(&self) -> Option<u8> {
         match self.inner {
@@ -259,6 +273,36 @@ impl MidiEventObject {
         match self.inner {
             MidiEventData::TimeSignature(signature) => Some(signature),
             _ => None,
+        }
+    }
+    
+    fn __str__(&self) -> String {
+        format!("{:#?}", self)
+    }
+    
+    fn __repr__(&self) -> String {self.__str__()}
+}
+
+impl<'l, 'i: 'l> From<&'l TrackEvent<'i>> for MidiEventObject {
+    fn from(event: &TrackEvent) -> Self {
+        MidiEventObject {
+            delta: event.delta.as_int(),
+            inner: match event.kind {
+                TrackEventKind::Midi { message, .. } => match message {
+                    MidiMessage::NoteOn { key, vel } => MidiEventData::NoteData {
+                        velocity: vel.as_int(),
+                        key: key.as_int(),
+                    },
+                    MidiMessage::NoteOff { key, .. } => MidiEventData::NoteData {
+                        velocity: 0,
+                        key: key.as_int(),
+                    },
+                    _ => MidiEventData::Other,
+                },
+                TrackEventKind::Meta(MetaMessage::TimeSignature(a, b, c, d)) => MidiEventData::TimeSignature([a,b,c,d]),
+                TrackEventKind::Meta(MetaMessage::EndOfTrack) => MidiEventData::EndOfTrack,
+                _ => MidiEventData::Other,
+            },
         }
     }
 }
